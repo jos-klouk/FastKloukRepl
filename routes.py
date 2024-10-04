@@ -1,8 +1,9 @@
-from flask import Blueprint, request, jsonify, redirect
+from flask import Blueprint, request, jsonify, redirect, url_for
 from flask_restx import Api, Resource, fields
-from flask_jwt_extended import jwt_required, create_access_token, get_jwt_identity
 from models import db, Book, User
-from auth import admin_required
+from auth0 import requires_auth, AuthError
+import requests
+from config import Config
 
 api_bp = Blueprint('api', __name__)
 api = Api(api_bp, version='1.0', title='Book API', description='A simple Book API')
@@ -32,8 +33,7 @@ class BookList(Resource):
     @ns.doc('create_book')
     @ns.expect(book_model)
     @ns.marshal_with(book_model, code=201)
-    @jwt_required()
-    @admin_required
+    @requires_auth
     def post(self):
         """Create a new book"""
         data = request.json
@@ -61,8 +61,7 @@ class BookItem(Resource):
     @ns.doc('update_book')
     @ns.expect(book_model)
     @ns.marshal_with(book_model)
-    @jwt_required()
-    @admin_required
+    @requires_auth
     def put(self, id):
         """Update a book given its identifier"""
         book = Book.query.get_or_404(id)
@@ -76,8 +75,7 @@ class BookItem(Resource):
 
     @ns.doc('delete_book')
     @ns.response(204, 'Book deleted')
-    @jwt_required()
-    @admin_required
+    @requires_auth
     def delete(self, id):
         """Delete a book given its identifier"""
         book = Book.query.get_or_404(id)
@@ -87,40 +85,45 @@ class BookItem(Resource):
 
 auth_ns = api.namespace('auth', description='Authentication operations')
 
-user_model = api.model('User', {
-    'username': fields.String(required=True),
-    'email': fields.String(required=True),
-    'password': fields.String(required=True)
-})
-
-@auth_ns.route('/register')
-class UserRegistration(Resource):
-    @ns.expect(user_model)
-    def post(self):
-        """Register a new user"""
-        data = request.json
-        if User.query.filter_by(username=data['username']).first():
-            return {'message': 'Username already exists'}, 400
-        if User.query.filter_by(email=data['email']).first():
-            return {'message': 'Email already exists'}, 400
-        
-        new_user = User(username=data['username'], email=data['email'])
-        new_user.set_password(data['password'])
-        db.session.add(new_user)
-        db.session.commit()
-        
-        return {'message': 'User created successfully'}, 201
-
 @auth_ns.route('/login')
-class UserLogin(Resource):
-    def post(self):
-        """Login and receive an access token"""
-        username = request.json.get('username', None)
-        password = request.json.get('password', None)
+class Auth0Login(Resource):
+    @api.doc(description='Redirect to Auth0 login page')
+    def get(self):
+        """Redirect to Auth0 login page"""
+        return redirect(f'https://{Config.AUTH0_DOMAIN}/authorize?'
+                        f'audience={Config.AUTH0_API_AUDIENCE}&'
+                        f'response_type=code&'
+                        f'client_id={Config.AUTH0_CLIENT_ID}&'
+                        f'redirect_uri={request.url_root}api/auth/callback')
+
+@auth_ns.route('/callback')
+class Auth0Callback(Resource):
+    @api.doc(description='Handle Auth0 callback')
+    def get(self):
+        """Handle Auth0 callback"""
+        code = request.args.get('code')
+        token_url = f'https://{Config.AUTH0_DOMAIN}/oauth/token'
+        token_payload = {
+            'grant_type': 'authorization_code',
+            'client_id': Config.AUTH0_CLIENT_ID,
+            'client_secret': Config.AUTH0_CLIENT_SECRET,
+            'code': code,
+            'redirect_uri': f'{request.url_root}api/auth/callback'
+        }
+        token_headers = {'content-type': 'application/json'}
+        token_response = requests.post(token_url, json=token_payload, headers=token_headers)
         
-        user = User.query.filter_by(username=username).first()
-        if user and user.check_password(password):
-            access_token = create_access_token(identity=username)
-            return {'access_token': access_token}, 200
+        if token_response.status_code != 200:
+            return jsonify(error='Failed to obtain access token'), 400
         
-        return {'message': 'Invalid username or password'}, 401
+        tokens = token_response.json()
+        access_token = tokens.get('access_token')
+        
+        # You can store the access token in a session or return it to the client
+        return jsonify(access_token=access_token)
+
+@api_bp.errorhandler(AuthError)
+def handle_auth_error(ex):
+    response = jsonify(ex.error)
+    response.status_code = ex.status_code
+    return response
