@@ -114,13 +114,12 @@ class Auth0Callback(Resource):
         token_response = requests.post(token_url, json=token_payload, headers=token_headers)
         
         if token_response.status_code != 200:
-            return jsonify(error='Failed to obtain access token'), 400
+            return {'error': 'Failed to obtain access token'}, 400
         
         tokens = token_response.json()
         access_token = tokens.get('access_token')
         
-        # You can store the access token in a session or return it to the client
-        return jsonify(access_token=access_token)
+        return {'access_token': access_token}, 200
 
 @api_bp.errorhandler(AuthError)
 def handle_auth_error(ex):
