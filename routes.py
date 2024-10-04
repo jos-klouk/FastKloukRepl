@@ -1,9 +1,11 @@
 from flask import Blueprint, request, jsonify, redirect, url_for
 from flask_restx import Api, Resource, fields
 from models import db, Book, User
-from auth0 import requires_auth, AuthError
+from auth0 import requires_auth, AuthError, get_token_auth_header
 import requests
 from config import Config
+from jose import jwt
+from datetime import datetime
 
 api_bp = Blueprint('api', __name__)
 api = Api(api_bp, version='1.0', title='Book API', description='A simple Book API')
@@ -19,7 +21,10 @@ book_model = api.model('Book', {
     'title': fields.String(required=True),
     'author': fields.String(required=True),
     'publication_year': fields.Integer,
-    'isbn': fields.String(required=True)
+    'isbn': fields.String(required=True),
+    'created_at': fields.DateTime(readonly=True),
+    'updated_at': fields.DateTime(readonly=True),
+    'user_id': fields.Integer(readonly=True)
 })
 
 @ns.route('/')
@@ -28,7 +33,7 @@ class BookList(Resource):
     @ns.marshal_list_with(book_model)
     def get(self):
         """List all books"""
-        return Book.query.all()
+        return [book.to_dict() for book in Book.query.all()]
 
     @ns.doc('create_book')
     @ns.expect(book_model)
@@ -37,15 +42,29 @@ class BookList(Resource):
     def post(self):
         """Create a new book"""
         data = request.json
+        token = get_token_auth_header()
+        payload = jwt.decode(token, options={"verify_signature": False})
+        user_id = payload.get('sub')
+        
+        user = User.query.filter_by(username=user_id).first()
+        if not user:
+            user = User(username=user_id, email=f"{user_id}@example.com")
+            user.set_password('dummy_password')
+            db.session.add(user)
+            db.session.commit()
+        
         new_book = Book(
             title=data['title'],
             author=data['author'],
             publication_year=data.get('publication_year'),
-            isbn=data['isbn']
+            isbn=data['isbn'],
+            user_id=user.id,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
         )
         db.session.add(new_book)
         db.session.commit()
-        return new_book, 201
+        return new_book.to_dict(), 201
 
 @ns.route('/<int:id>')
 @ns.response(404, 'Book not found')
@@ -56,7 +75,7 @@ class BookItem(Resource):
     def get(self, id):
         """Fetch a book given its identifier"""
         book = Book.query.get_or_404(id)
-        return book
+        return book.to_dict()
 
     @ns.doc('update_book')
     @ns.expect(book_model)
@@ -65,13 +84,22 @@ class BookItem(Resource):
     def put(self, id):
         """Update a book given its identifier"""
         book = Book.query.get_or_404(id)
+        token = get_token_auth_header()
+        payload = jwt.decode(token, options={"verify_signature": False})
+        user_id = payload.get('sub')
+        
+        user = User.query.filter_by(username=user_id).first()
+        if not user or book.user_id != user.id:
+            return {'message': 'Unauthorized'}, 403
+        
         data = request.json
         book.title = data.get('title', book.title)
         book.author = data.get('author', book.author)
         book.publication_year = data.get('publication_year', book.publication_year)
         book.isbn = data.get('isbn', book.isbn)
+        book.updated_at = datetime.utcnow()
         db.session.commit()
-        return book
+        return book.to_dict()
 
     @ns.doc('delete_book')
     @ns.response(204, 'Book deleted')
@@ -79,6 +107,14 @@ class BookItem(Resource):
     def delete(self, id):
         """Delete a book given its identifier"""
         book = Book.query.get_or_404(id)
+        token = get_token_auth_header()
+        payload = jwt.decode(token, options={"verify_signature": False})
+        user_id = payload.get('sub')
+        
+        user = User.query.filter_by(username=user_id).first()
+        if not user or book.user_id != user.id:
+            return {'message': 'Unauthorized'}, 403
+        
         db.session.delete(book)
         db.session.commit()
         return '', 204
