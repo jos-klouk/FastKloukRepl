@@ -94,7 +94,7 @@ class Auth0Login(Resource):
                         f'audience={Config.AUTH0_API_AUDIENCE}&'
                         f'response_type=code&'
                         f'client_id={Config.AUTH0_CLIENT_ID}&'
-                        f'redirect_uri={request.url_root}api/auth/callback')
+                        f'redirect_uri=https://7a73eebe-12e5-4475-8414-4a84df9d1917-00-n6ek6u9okl79.kirk.replit.dev/api/auth/callback')
 
 @auth_ns.route('/callback')
 class Auth0Callback(Resource):
@@ -108,7 +108,7 @@ class Auth0Callback(Resource):
             'client_id': Config.AUTH0_CLIENT_ID,
             'client_secret': Config.AUTH0_CLIENT_SECRET,
             'code': code,
-            'redirect_uri': f'{request.url_root}api/auth/callback'
+            'redirect_uri': 'https://7a73eebe-12e5-4475-8414-4a84df9d1917-00-n6ek6u9okl79.kirk.replit.dev/api/auth/callback'
         }
         token_headers = {'content-type': 'application/json'}
         token_response = requests.post(token_url, json=token_payload, headers=token_headers)
