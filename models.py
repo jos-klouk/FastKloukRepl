@@ -22,8 +22,6 @@ class Book(db.Model):
     isbn = db.Column(db.String(13), unique=True, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    user = db.relationship('User', backref=db.backref('books', lazy=True))
     created_by = db.Column(db.String(64), nullable=False)
     modified_by = db.Column(db.String(64), nullable=False)
 
@@ -36,7 +34,6 @@ class Book(db.Model):
             'isbn': self.isbn,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
-            'user_id': self.user_id,
             'created_by': self.created_by,
             'modified_by': self.modified_by
         }

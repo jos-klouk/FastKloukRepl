@@ -24,7 +24,6 @@ book_model = api.model('Book', {
     'isbn': fields.String(required=True),
     'created_at': fields.DateTime(readonly=True),
     'updated_at': fields.DateTime(readonly=True),
-    'user_id': fields.Integer(readonly=True),
     'created_by': fields.String(readonly=True),
     'modified_by': fields.String(readonly=True)
 })
@@ -49,19 +48,11 @@ class BookList(Resource):
             payload = jwt.decode(token, options={"verify_signature": False})
             user_id = payload.get('sub')
             
-            user = User.query.filter_by(username=user_id).first()
-            if not user:
-                user = User(username=user_id, email=f"{user_id}@example.com")
-                user.set_password('dummy_password')
-                db.session.add(user)
-                db.session.commit()
-            
             new_book = Book(
                 title=data['title'],
                 author=data['author'],
                 publication_year=data.get('publication_year'),
                 isbn=data['isbn'],
-                user_id=user.id,
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow(),
                 created_by=user_id,
@@ -97,8 +88,7 @@ class BookItem(Resource):
             payload = jwt.decode(token, options={"verify_signature": False})
             user_id = payload.get('sub')
             
-            user = User.query.filter_by(username=user_id).first()
-            if not user or book.user_id != user.id:
+            if book.created_by != user_id:
                 return {'message': 'Unauthorized'}, 403
             
             data = request.json
@@ -125,8 +115,7 @@ class BookItem(Resource):
             payload = jwt.decode(token, options={"verify_signature": False})
             user_id = payload.get('sub')
             
-            user = User.query.filter_by(username=user_id).first()
-            if not user or book.user_id != user.id:
+            if book.created_by != user_id:
                 return {'message': 'Unauthorized'}, 403
             
             db.session.delete(book)
