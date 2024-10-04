@@ -24,7 +24,9 @@ book_model = api.model('Book', {
     'isbn': fields.String(required=True),
     'created_at': fields.DateTime(readonly=True),
     'updated_at': fields.DateTime(readonly=True),
-    'user_id': fields.Integer(readonly=True)
+    'user_id': fields.Integer(readonly=True),
+    'created_by': fields.String(readonly=True),
+    'modified_by': fields.String(readonly=True)
 })
 
 @ns.route('/')
@@ -41,30 +43,36 @@ class BookList(Resource):
     @requires_auth
     def post(self):
         """Create a new book"""
-        data = request.json
-        token = get_token_auth_header()
-        payload = jwt.decode(token, options={"verify_signature": False})
-        user_id = payload.get('sub')
-        
-        user = User.query.filter_by(username=user_id).first()
-        if not user:
-            user = User(username=user_id, email=f"{user_id}@example.com")
-            user.set_password('dummy_password')
-            db.session.add(user)
+        try:
+            data = request.json
+            token = get_token_auth_header()
+            payload = jwt.decode(token, options={"verify_signature": False})
+            user_id = payload.get('sub')
+            
+            user = User.query.filter_by(username=user_id).first()
+            if not user:
+                user = User(username=user_id, email=f"{user_id}@example.com")
+                user.set_password('dummy_password')
+                db.session.add(user)
+                db.session.commit()
+            
+            new_book = Book(
+                title=data['title'],
+                author=data['author'],
+                publication_year=data.get('publication_year'),
+                isbn=data['isbn'],
+                user_id=user.id,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+                created_by=user_id,
+                modified_by=user_id
+            )
+            db.session.add(new_book)
             db.session.commit()
-        
-        new_book = Book(
-            title=data['title'],
-            author=data['author'],
-            publication_year=data.get('publication_year'),
-            isbn=data['isbn'],
-            user_id=user.id,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
-        )
-        db.session.add(new_book)
-        db.session.commit()
-        return new_book.to_dict(), 201
+            return new_book.to_dict(), 201
+        except Exception as e:
+            db.session.rollback()
+            return {'message': f'Error creating book: {str(e)}'}, 500
 
 @ns.route('/<int:id>')
 @ns.response(404, 'Book not found')
@@ -83,41 +91,50 @@ class BookItem(Resource):
     @requires_auth
     def put(self, id):
         """Update a book given its identifier"""
-        book = Book.query.get_or_404(id)
-        token = get_token_auth_header()
-        payload = jwt.decode(token, options={"verify_signature": False})
-        user_id = payload.get('sub')
-        
-        user = User.query.filter_by(username=user_id).first()
-        if not user or book.user_id != user.id:
-            return {'message': 'Unauthorized'}, 403
-        
-        data = request.json
-        book.title = data.get('title', book.title)
-        book.author = data.get('author', book.author)
-        book.publication_year = data.get('publication_year', book.publication_year)
-        book.isbn = data.get('isbn', book.isbn)
-        book.updated_at = datetime.utcnow()
-        db.session.commit()
-        return book.to_dict()
+        try:
+            book = Book.query.get_or_404(id)
+            token = get_token_auth_header()
+            payload = jwt.decode(token, options={"verify_signature": False})
+            user_id = payload.get('sub')
+            
+            user = User.query.filter_by(username=user_id).first()
+            if not user or book.user_id != user.id:
+                return {'message': 'Unauthorized'}, 403
+            
+            data = request.json
+            book.title = data.get('title', book.title)
+            book.author = data.get('author', book.author)
+            book.publication_year = data.get('publication_year', book.publication_year)
+            book.isbn = data.get('isbn', book.isbn)
+            book.updated_at = datetime.utcnow()
+            book.modified_by = user_id
+            db.session.commit()
+            return book.to_dict()
+        except Exception as e:
+            db.session.rollback()
+            return {'message': f'Error updating book: {str(e)}'}, 500
 
     @ns.doc('delete_book')
     @ns.response(204, 'Book deleted')
     @requires_auth
     def delete(self, id):
         """Delete a book given its identifier"""
-        book = Book.query.get_or_404(id)
-        token = get_token_auth_header()
-        payload = jwt.decode(token, options={"verify_signature": False})
-        user_id = payload.get('sub')
-        
-        user = User.query.filter_by(username=user_id).first()
-        if not user or book.user_id != user.id:
-            return {'message': 'Unauthorized'}, 403
-        
-        db.session.delete(book)
-        db.session.commit()
-        return '', 204
+        try:
+            book = Book.query.get_or_404(id)
+            token = get_token_auth_header()
+            payload = jwt.decode(token, options={"verify_signature": False})
+            user_id = payload.get('sub')
+            
+            user = User.query.filter_by(username=user_id).first()
+            if not user or book.user_id != user.id:
+                return {'message': 'Unauthorized'}, 403
+            
+            db.session.delete(book)
+            db.session.commit()
+            return '', 204
+        except Exception as e:
+            db.session.rollback()
+            return {'message': f'Error deleting book: {str(e)}'}, 500
 
 auth_ns = api.namespace('auth', description='Authentication operations')
 
